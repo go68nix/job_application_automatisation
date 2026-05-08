@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>job-applier</title>
+  <style>
+    :root { --bg:#0f172a; --text:#111827; --muted:#6b7280; --ok:#16a34a; --warn:#d97706; --bad:#dc2626; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Arial, sans-serif; color:var(--text); background:#f3f4f6; }
+    .app { display:flex; min-height:100vh; }
+    .sidebar { width:240px; background:var(--bg); color:#fff; padding:24px 16px; }
+    .sidebar h1 { margin:0 0 20px; font-size:20px; }
+    .nav-btn { width:100%; margin-bottom:8px; background:#1e293b; color:#fff; border:0; padding:10px; border-radius:8px; cursor:pointer; }
+    .nav-btn.active { background:#334155; }
+    .main { flex:1; background:#fff; padding:24px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin-bottom:16px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    input, textarea, select { width:100%; padding:10px; border:1px solid #d1d5db; border-radius:8px; }
+    button { padding:10px 14px; border:0; border-radius:8px; background:#111827; color:#fff; cursor:pointer; }
+    button[disabled] { opacity:.45; cursor:not-allowed; }
+    .badge { display:inline-block; padding:4px 8px; border-radius:999px; color:#fff; font-size:12px; }
+    .green { background:var(--ok); } .yellow { background:var(--warn); } .red { background:var(--bad); }
+    .loading { display:none; margin-left:8px; }
+    .step { display:none; } .step.active { display:block; }
+    .two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .panel { border:1px solid #e5e7eb; border-radius:12px; padding:12px; min-height:240px; white-space:pre-wrap; background:#fafafa; }
+    .table { width:100%; border-collapse:collapse; }
+    .table th, .table td { border-bottom:1px solid #e5e7eb; text-align:left; padding:8px; }
+    .modal { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; }
+    .modal .inner { background:#fff; border-radius:12px; padding:20px; width:420px; max-width:90vw; }
+    .muted { color:var(--muted); font-size:14px; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <h1>job-applier</h1>
+    <button class="nav-btn active" data-view="wizard">Application Wizard</button>
+    <button class="nav-btn" data-view="tracker">Tracker</button>
+  </aside>
+  <main class="main">
+    <section id="wizard-view">
+      <div id="step1" class="step">
+        <h2>Step 1 — Setup</h2>
+        <div class="card">
+          <input type="file" id="cvFile" accept="application/pdf" />
+          <button id="uploadCvBtn">Upload CV PDF</button><span id="uploadCvLoading" class="loading">Loading...</span>
+          <p id="cvStatus" class="muted"></p>
+        </div>
+        <div class="card">
+          <div class="row">
+            <div style="flex:1"><label>Base Location</label><input id="baseLocation" /></div>
+            <div style="flex:1"><label>Max Commute</label><input id="maxCommute" /></div>
+          </div>
+          <label>Target Roles (comma-separated)</label><input id="targetRoles" />
+          <label>Deal Breakers (comma-separated)</label><input id="dealBreakers" />
+          <button id="saveConfigBtn">Save & Continue</button><span id="configLoading" class="loading">Loading...</span>
+        </div>
+      </div>
+
+      <div id="step2" class="step">
+        <h2>Step 2 — Analyse Job</h2>
+        <div class="card">
+          <label>Job URL</label><input id="jobUrl" placeholder="https://..." />
+          <button id="analyseBtn">Analyse</button><span id="analyseLoading" class="loading">Loading...</span>
+          <div id="manualBlock" style="display:none; margin-top:12px;">
+            <p class="muted">Scraping failed. Paste details manually:</p>
+            <input id="manualCompany" placeholder="Company" />
+            <input id="manualRole" placeholder="Role" />
+            <input id="manualLocation" placeholder="Location" />
+            <label><input type="checkbox" id="manualRemote" /> Remote/Hybrid possible</label>
+            <textarea id="manualDescription" rows="8" placeholder="Paste full job description"></textarea>
+            <button id="analyseManualBtn">Analyse Manual Description</button>
+          </div>
+        </div>
+        <div id="scoreCard" class="card" style="display:none;"></div>
+        <button id="toStep3Btn" disabled>Continue to review gaps →</button>
+      </div>
+
+      <div id="step3" class="step">
+        <h2>Step 3 — Gap Review</h2>
+        <div id="gapContainer"></div>
+        <button id="generateBtn" disabled>Generate documents →</button><span id="generateLoading" class="loading">Loading...</span>
+      </div>
+
+      <div id="step4" class="step">
+        <h2>Step 4 — Results</h2>
+        <div class="row" style="align-items:center; margin-bottom:12px;">
+          <span>Match score:</span> <span id="resultScore"></span>
+          <a id="downloadCv" target="_blank"><button>Download CV PDF</button></a>
+          <a id="downloadCl" target="_blank"><button>Download Cover Letter PDF</button></a>
+        </div>
+        <div class="two-col">
+          <div><h3>CV Summary</h3><div class="panel" id="cvPanel"></div></div>
+          <div><h3>Cover Letter</h3><div class="panel" id="clPanel"></div></div>
+        </div>
+        <div class="card">
+          <label>Status</label>
+          <select id="finalStatus"><option>Generated</option><option>Applied</option><option>Interview</option><option>Rejected</option></select>
+          <label>Notes</label>
+          <textarea id="finalNotes" rows="4"></textarea>
+          <button id="saveFinalMetaBtn">Save status & notes</button>
+        </div>
+        <button id="newApplicationBtn">Start new application</button>
+      </div>
+    </section>
+
+    <section id="tracker-view" style="display:none;">
+      <h2>Tracker</h2>
+      <div class="card">
+        <table class="table" id="trackerTable">
+          <thead><tr><th>Company</th><th>Role</th><th>Score</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="warningModal">
+  <div class="inner">
+    <h3>Warning</h3>
+    <p>This job may not be a good fit. Continue anyway?</p>
+    <div class="row"><button id="warningCancel">Cancel</button><button id="warningContinue">Continue</button></div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8000';
+const state = { currentStep: 1, fit: null, gaps: [], applicationId: null };
+
+function $(id){ return document.getElementById(id); }
+function showLoading(id,on){ $(id).style.display = on ? 'inline' : 'none'; }
+function showStep(n){ for(let i=1;i<=4;i++) $('step'+i).classList.toggle('active', i===n); state.currentStep=n; }
+function scoreClass(score){ return score>=65?'green':score>=40?'yellow':'red'; }
+function badge(cls,text){ return `<span class="badge ${cls}">${text}</span>`; }
+function csvToList(v){ return v.split(',').map(x=>x.trim()).filter(Boolean); }
+
+async function api(path, options={}){
+  const r = await fetch(API+path, { headers:{'Content-Type':'application/json'}, ...options });
+  if(!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function loadConfig(){
+  const cfg = await api('/config');
+  $('baseLocation').value = cfg.base_location || '';
+  $('maxCommute').value = cfg.max_commute || '';
+  $('targetRoles').value = (cfg.target_roles||[]).join(', ');
+  $('dealBreakers').value = (cfg.deal_breakers||[]).join(', ');
+  $('cvStatus').textContent = cfg.cv_uploaded ? 'CV already uploaded.' : 'No CV uploaded yet.';
+  showStep(cfg.cv_uploaded ? 2 : 1);
+}
+
+$('uploadCvBtn').onclick = async () => {
+  const file = $('cvFile').files[0];
+  if(!file){ alert('Please choose a PDF first.'); return; }
+  const form = new FormData(); form.append('file', file);
+  showLoading('uploadCvLoading', true);
+  try {
+    const r = await fetch(API + '/upload-cv', { method:'POST', body: form });
+    if(!r.ok) throw new Error(await r.text());
+    $('cvStatus').textContent = 'CV uploaded successfully.';
+  } catch(e){ alert('Upload failed: '+e.message); }
+  finally { showLoading('uploadCvLoading', false); }
+};
+
+$('saveConfigBtn').onclick = async () => {
+  showLoading('configLoading', true);
+  try {
+    await api('/config', { method:'POST', body: JSON.stringify({
+      base_location: $('baseLocation').value,
+      max_commute: $('maxCommute').value,
+      target_roles: csvToList($('targetRoles').value),
+      deal_breakers: csvToList($('dealBreakers').value)
+    })});
+    showStep(2);
+  } catch(e){ alert('Save failed: '+e.message); }
+  finally { showLoading('configLoading', false); }
+};
+
+function renderScoreCard(data){
+  const geo = data.geo;
+  const profile = data.profile;
+  const gaps = data.gaps || [];
+  $('scoreCard').style.display = 'block';
+  $('scoreCard').innerHTML = `
+    <div>Location: ${badge(geo.verdict==='green'?'green':geo.verdict==='yellow'?'yellow':'red', geo.verdict)} - ${geo.reason}</div>
+    <div style="margin-top:8px;">Match: ${badge(scoreClass(profile.match_score), profile.match_score)} - ${profile.reason}</div>
+    <div style="margin-top:8px;"><b>Gaps:</b> ${gaps.length ? gaps.map(g=>`<span class='badge red'>${g.skill}</span>`).join(' ') : '<span class="muted">No critical gaps found.</span>'}</div>
+  `;
+}
+
+async function analyse(payload){
+  showLoading('analyseLoading', true);
+  try {
+    const data = await api('/fit-check', { method:'POST', body: JSON.stringify(payload) });
+    if(data.need_manual_description){ $('manualBlock').style.display='block'; return; }
+    state.fit = data;
+    state.gaps = (data.gaps||[]).map(g => ({ skill:g.skill, answer:null, detail:'' }));
+    renderScoreCard(data);
+    const shouldWarn = data.geo.verdict === 'red' || data.profile.match_score < 40;
+    $('toStep3Btn').disabled = shouldWarn;
+    if (shouldWarn) $('warningModal').style.display = 'flex';
+  } catch(e){ alert('Analyse failed: '+e.message); }
+  finally { showLoading('analyseLoading', false); }
+}
+
+$('analyseBtn').onclick = () => analyse({ url: $('jobUrl').value.trim() });
+$('analyseManualBtn').onclick = () => analyse({
+  url: $('jobUrl').value.trim(),
+  manual_description: $('manualDescription').value,
+  company: $('manualCompany').value,
+  role: $('manualRole').value,
+  location: $('manualLocation').value,
+  remote_ok: $('manualRemote').checked
+});
+
+$('toStep3Btn').onclick = () => {
+  if(!state.fit) return;
+  renderGaps();
+  showStep(3);
+};
+
+$('warningCancel').onclick = () => $('warningModal').style.display='none';
+$('warningContinue').onclick = () => {
+  $('toStep3Btn').disabled = false;
+  $('warningModal').style.display='none';
+};
+
+function renderGaps(){
+  const container = $('gapContainer');
+  container.innerHTML = '';
+  if(!state.gaps.length){ container.innerHTML = '<p class="muted">No missing skills to review.</p>'; $('generateBtn').disabled = false; return; }
+  state.gaps.forEach((g) => {
+    const card = document.createElement('div');
+    card.className='card';
+    card.innerHTML = `
+      <h4>${g.skill}</h4>
+      <p class="muted">Found in your CV? No</p>
+      <div class="row">
+        <button data-a="yes">Yes, I have this</button>
+        <button data-a="somewhat">Somewhat</button>
+        <button data-a="no">No</button>
+      </div>
+      <textarea rows="3" placeholder="Briefly describe your experience" style="display:none"></textarea>
+    `;
+    const ta = card.querySelector('textarea');
+    card.querySelectorAll('button[data-a]').forEach(b => b.onclick = () => {
+      g.answer = b.dataset.a;
+      ta.style.display = (g.answer === 'yes' || g.answer === 'somewhat') ? 'block' : 'none';
+      if(ta.style.display === 'none') g.detail = '';
+      $('generateBtn').disabled = state.gaps.some(x => !x.answer);
+    });
+    ta.oninput = () => { g.detail = ta.value; };
+    container.appendChild(card);
+  });
+  $('generateBtn').disabled = state.gaps.some(x => !x.answer);
+}
+
+$('generateBtn').onclick = async () => {
+  if(!state.fit) return;
+  showLoading('generateLoading', true);
+  try {
+    const r = await api('/generate', { method:'POST', body: JSON.stringify({
+      job: state.fit.job,
+      gap_answers: state.gaps,
+      match_score: state.fit.profile.match_score
+    })});
+    state.applicationId = r.application_id;
+    $('cvPanel').textContent = r.cv_text;
+    $('clPanel').textContent = r.cover_letter_text;
+    $('resultScore').innerHTML = badge(scoreClass(state.fit.profile.match_score), state.fit.profile.match_score);
+    $('downloadCv').href = `${API}/outputs/${r.cv_path}`;
+    $('downloadCl').href = `${API}/outputs/${r.cl_path}`;
+    $('finalStatus').value = 'Generated';
+    $('finalNotes').value = '';
+    showStep(4);
+    await loadTracker();
+  } catch(e){ alert('Generate failed: '+e.message); }
+  finally { showLoading('generateLoading', false); }
+};
+
+$('saveFinalMetaBtn').onclick = async () => {
+  if(!state.applicationId) return;
+  try {
+    await api(`/applications/${state.applicationId}`, { method:'PATCH', body: JSON.stringify({ status:$('finalStatus').value, notes:$('finalNotes').value }) });
+    await loadTracker();
+    alert('Saved.');
+  } catch(e){ alert('Save failed: '+e.message); }
+};
+
+$('newApplicationBtn').onclick = () => {
+  state.fit = null; state.gaps = []; state.applicationId = null;
+  $('scoreCard').style.display='none';
+  $('manualBlock').style.display='none';
+  $('jobUrl').value='';
+  $('toStep3Btn').disabled=true;
+  showStep(2);
+};
+
+async function loadTracker(){
+  const apps = await api('/applications');
+  const tbody = document.querySelector('#trackerTable tbody');
+  tbody.innerHTML = '';
+  apps.forEach(app => {
+    const tr = document.createElement('tr');
+    const cvBtn = app.cv_path ? `<a target="_blank" href="${API}/outputs/${app.cv_path}">CV</a>` : '-';
+    const clBtn = app.cl_path ? `<a target="_blank" href="${API}/outputs/${app.cl_path}">CL</a>` : '-';
+    tr.innerHTML = `
+      <td>${app.company || ''}</td>
+      <td>${app.role || ''}</td>
+      <td>${app.match_score ?? ''}</td>
+      <td>
+        <select data-id="${app.id}" class="status-dd">
+          ${['Generated','Applied','Interview','Rejected'].map(s=>`<option ${app.status===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td>${(app.date_generated || '').slice(0,10)}</td>
+      <td>${cvBtn} ${clBtn} <button data-del="${app.id}" style="background:#dc2626">Delete</button></td>
+    `;
+    tr.onclick = (ev) => {
+      if(ev.target.closest('button,select,a')) return;
+      $('finalNotes').value = app.notes || '';
+    };
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('.status-dd').forEach(el => el.onchange = async () => {
+    await api(`/applications/${el.dataset.id}`, { method:'PATCH', body: JSON.stringify({ status: el.value }) });
+  });
+  tbody.querySelectorAll('button[data-del]').forEach(el => el.onclick = async () => {
+    if(!confirm('Delete this record?')) return;
+    await api(`/applications/${el.dataset.del}`, { method:'DELETE' });
+    await loadTracker();
+  });
+}
+
+for (const btn of document.querySelectorAll('.nav-btn')) {
+  btn.onclick = async () => {
+    document.querySelectorAll('.nav-btn').forEach(x => x.classList.remove('active'));
+    btn.classList.add('active');
+    const isWizard = btn.dataset.view === 'wizard';
+    $('wizard-view').style.display = isWizard ? 'block' : 'none';
+    $('tracker-view').style.display = isWizard ? 'none' : 'block';
+    if(!isWizard) await loadTracker();
+  };
+}
+
+loadConfig().catch(e => alert('Failed to load config: '+e.message));
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "base_location": "Munich, Germany",
+  "max_commute": "same city or remote",
+  "target_roles": ["software engineer", "backend developer"],
+  "deal_breakers": ["sales", "pure management"]
+}
