@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -158,7 +158,7 @@ async def generate(payload: GenerateRequest) -> dict[str, Any]:
             "url": payload.job.get("url"),
             "match_score": payload.match_score,
             "status": "Generated",
-            "date_generated": datetime.utcnow().isoformat(),
+            "date_generated": datetime.now(timezone.utc).isoformat(),
             "cv_path": cv_path,
             "cl_path": cl_path,
             "notes": "",

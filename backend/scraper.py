@@ -9,6 +9,8 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
 REMOTE_PATTERNS = ("remote", "hybrid", "work from home", "home office")
+MIN_SCRAPE_DELAY_SECONDS = 2
+MAX_SCRAPE_DELAY_SECONDS = 4
 
 
 def _clean(text: str) -> str:
@@ -16,7 +18,7 @@ def _clean(text: str) -> str:
 
 
 async def scrape_job(url: str) -> dict[str, Any] | None:
-    await asyncio.sleep(random.uniform(2, 4))
+    await asyncio.sleep(random.uniform(MIN_SCRAPE_DELAY_SECONDS, MAX_SCRAPE_DELAY_SECONDS))
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)

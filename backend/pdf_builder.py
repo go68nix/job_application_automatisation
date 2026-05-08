@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import datetime as dt
+from datetime import datetime, timezone
 import html
 import re
 from pathlib import Path
@@ -59,7 +59,7 @@ def _base_css() -> str:
 
 
 def build_pdfs(company: str, role: str, cv_text: str, cover_letter_text: str) -> tuple[str, str]:
-    today = dt.date.today().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     folder_name = f"{_sanitize_filename(company)}_{_sanitize_filename(role)}_{today}"
     output_dir = OUTPUT_BASE / folder_name
     output_dir.mkdir(parents=True, exist_ok=True)

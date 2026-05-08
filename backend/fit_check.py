@@ -2,49 +2,16 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 from pathlib import Path
 from typing import Any
 
-import httpx
-
+from .gemini_client import call_gemini
 from .prompts import GEO_CHECK_PROMPT, PROFILE_MATCH_PROMPT, REQUIREMENTS_EXTRACT_PROMPT
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
 CONFIG_PATH = DATA_DIR / "user_config.json"
 MASTER_CV_PATH = DATA_DIR / "master_cv.pdf"
-
-
-async def call_gemini(prompt: str, pdf_base64: str | None = None) -> str:
-    parts = []
-    if pdf_base64:
-        parts.append({
-            "inline_data": {
-                "mime_type": "application/pdf",
-                "data": pdf_base64
-            }
-        })
-    parts.append({"text": prompt})
-
-    payload = {
-        "contents": [{"parts": parts}],
-        "generationConfig": {
-            "temperature": 0.7,
-            "maxOutputTokens": 1500
-        }
-    }
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(
-            GEMINI_URL,
-            params={"key": os.getenv("GEMINI_API_KEY")},
-            json=payload
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
 def _extract_json(raw: str) -> dict[str, Any]:
