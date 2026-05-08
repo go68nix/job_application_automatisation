@@ -158,7 +158,7 @@ async def generate(payload: GenerateRequest) -> dict[str, Any]:
             "url": payload.job.get("url"),
             "match_score": payload.match_score,
             "status": "Generated",
-            "date_generated": datetime.now(timezone.utc).isoformat(),
+            "date_generated": datetime.now(tz=timezone.utc).isoformat(),
             "cv_path": cv_path,
             "cl_path": cl_path,
             "notes": "",
