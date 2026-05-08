@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+data/master_cv.pdf
+data/applications.db
+data/outputs/*
+!data/outputs/.gitkeep

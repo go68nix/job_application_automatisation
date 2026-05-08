@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+playwright
+httpx
+weasyprint
+python-multipart
+python-dotenv
