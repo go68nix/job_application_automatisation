@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from .fit_check import (
     load_master_cv_base64,
+    load_master_cv_text,
     load_user_config,
     stage_1_geo_check,
     stage_2_profile_match,
@@ -20,7 +21,9 @@ from .fit_check import (
 )
 from .generator import generate_documents
 from .pdf_builder import build_pdfs
-from .scraper import scrape_job
+from .scraper import parse_pasted_page, scrape_job, parse_job_with_ai
+from .job_filter import parse_job_with_groq, filter_job_with_groq
+from fastapi import Body
 from .tracker import delete_application, get_all_applications, init_db, save_application, update_notes, update_status
 
 load_dotenv()
@@ -68,6 +71,14 @@ class PatchApplication(BaseModel):
     notes: str | None = None
 
 
+@app.get("/")
+async def serve_frontend() -> FileResponse:
+    frontend_index = BASE_DIR / "frontend" / "index.html"
+    if not frontend_index.exists():
+        raise HTTPException(status_code=404, detail="Frontend not found")
+    return FileResponse(path=frontend_index)
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -97,6 +108,39 @@ async def upload_cv(file: UploadFile = File(...)) -> dict[str, bool]:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
     MASTER_CV_PATH.write_bytes(content)
     return {"success": True}
+
+
+@app.get("/master-cv")
+async def get_master_cv() -> FileResponse:
+    if not MASTER_CV_PATH.exists():
+        raise HTTPException(status_code=404, detail="Master CV not uploaded yet")
+    return FileResponse(
+        path=MASTER_CV_PATH,
+        media_type="application/pdf",
+        filename=MASTER_CV_PATH.name,
+        content_disposition_type="inline",
+    )
+
+
+@app.get('/master-cv-text')
+async def get_master_cv_text() -> dict[str, Any]:
+    """Return extracted plain text from the uploaded master CV PDF."""
+    try:
+        text = load_master_cv_text()
+        # If the loader returned a base64 PDF (fallback), detect and return a helpful message
+        try:
+            import base64
+            decoded = base64.b64decode(text)
+            if isinstance(decoded, (bytes, bytearray)) and decoded[:4] == b"%PDF":
+                return {"text": "[Text extraction failed: PDF appears to be binary or image-scanned. Please upload a selectable-text PDF or enable OCR.]", "extracted": False}
+        except Exception:
+            # not base64 or decode failed — treat as plain text
+            pass
+        return {"text": text, "extracted": True}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to extract CV text: {exc}") from exc
 
 
 @app.post("/fit-check")
@@ -131,6 +175,76 @@ async def fit_check(payload: FitCheckRequest) -> dict[str, Any]:
     gaps = [{"skill": item["skill"]} for item in gaps_result.get("requirements", []) if item.get("gap")]
 
     return {"job": job, "geo": geo, "profile": profile, "gaps": gaps}
+
+
+@app.post('/scrape')
+async def scrape_endpoint(payload: dict = Body(...)) -> dict[str, Any]:
+    """Lightweight scrape endpoint that returns raw scrape result or an indicator
+    that manual description is needed."""
+    url = payload.get('url')
+    page_content = payload.get('page_content')
+    if not url and not page_content:
+        raise HTTPException(status_code=400, detail='Provide url or page_content in JSON body')
+
+    if page_content:
+        job = await parse_pasted_page(page_content, url=url or 'manual')
+    else:
+        job = await scrape_job(url)
+    if not job:
+        return {
+            'error': 'Scraping failed',
+            'need_manual_description': True,
+        }
+    return {'job': job}
+
+
+@app.post('/scrape-with-ai')
+async def scrape_with_ai_endpoint(payload: dict = Body(...)) -> dict[str, Any]:
+    """Parse job content using Gemini AI. Expects page_content and optional url."""
+    page_content = payload.get('page_content')
+    url = payload.get('url')
+    
+    if not page_content:
+        raise HTTPException(status_code=400, detail='Provide page_content in JSON body')
+    
+    result = await parse_job_with_ai(page_content, url=url or 'manual')
+    # parse_job_with_ai now returns either {"job": {...}} or {"error": "..."}
+    if not result:
+        return {
+            'error': 'AI parsing failed',
+            'need_manual_description': True,
+        }
+    if isinstance(result, dict) and result.get('error'):
+        return {'error': result.get('error'), 'need_manual_description': True}
+    if isinstance(result, dict) and result.get('job'):
+        return {'job': result.get('job')}
+    # fallback
+    return {'error': 'AI parsing failed', 'need_manual_description': True}
+
+
+@app.post('/filter-job')
+async def filter_job_endpoint(payload: dict = Body(...)) -> dict[str, Any]:
+    """Filter job using Groq: geo check, talent fit, extract gaps."""
+    job = payload.get('job')
+    
+    if not job or not isinstance(job, dict):
+        raise HTTPException(status_code=400, detail='Provide job object in request body')
+    
+    try:
+        # Prefer extracting real text from the PDF
+        cv_text = load_master_cv_text()
+    except Exception:
+        cv_text = "No CV available - please upload a CV first"
+    
+    user_config = load_user_config()
+    base_location = user_config.get('base_location', 'Munich, Germany')
+    
+    result = await filter_job_with_groq(job, cv_text, base_location)
+    if result.get('error'):
+        return {'error': result.get('error')}
+    
+    return result
+
 
 
 @app.post("/generate")

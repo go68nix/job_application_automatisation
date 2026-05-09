@@ -40,14 +40,114 @@
     <button class="nav-btn" data-view="tracker">Tracker</button>
   </aside>
   <main class="main">
+    <div class="card" style="margin-bottom:16px; border:2px solid #16a34a; background:#f0fdf4;">
+      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+        <div>
+          <h3 style="margin:0;">CV Upload</h3>
+          <div class="muted" style="margin-top:4px;">Upload your CV once. It is saved on the backend and stays available after refresh.</div>
+        </div>
+        <span class="badge green">Persistent</span>
+      </div>
+      <div class="row" style="align-items:center;">
+        <input type="file" id="cvFile" accept="application/pdf" />
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <button id="uploadCvBtn">Upload CV PDF</button>
+          <span id="uploadCvLoading" class="loading">Loading...</span>
+        </div>
+      </div>
+      <p id="cvStatus" class="muted" style="margin:10px 0 0;"></p>
+    </div>
+
+    <div class="card" style="margin-bottom:16px; border:2px solid #a855f7; background:#faf5ff;">
+      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+        <div>
+          <h3 style="margin:0;">Master CV Preview</h3>
+          <div class="muted" style="margin-top:4px;">This shows the uploaded CV file directly in the page.</div>
+        </div>
+        <span class="badge" style="background:#a855f7;">Always visible</span>
+      </div>
+      <div class="panel" style="padding:0; overflow:hidden; min-height:420px; background:#fff;">
+        <iframe id="cvPreviewFrame" title="Master CV preview" style="width:100%; height:420px; border:0; display:block;"></iframe>
+      </div>
+      <div class="muted" id="cvPreviewStatus" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px; border:2px solid #10b981; background:#ecfdf5;">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:8px;">
+        <div>
+          <h3 style="margin:0;">Extracted CV Text</h3>
+          <div class="muted" style="margin-top:4px;">Raw text extracted from your uploaded CV (for AI matching).</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="cvExtractRefreshBtn">Refresh extracted text</button>
+          <span id="cvExtractLoading" class="loading" style="display:none;">Refreshing...</span>
+        </div>
+      </div>
+      <div class="panel" style="background:#fff; padding:12px; max-height:320px; overflow:auto; white-space:pre-wrap;">
+        <div id="cvExtractedText" class="muted">No extracted text available. Upload a CV and click refresh.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px; border:2px solid #0ea5e9; background:#eff6ff;">
+      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+        <div>
+          <h3 style="margin:0;">Quick Scraper</h3>
+          <div class="muted" style="margin-top:4px;">Paste a job link and preview the scrape immediately — no CV required.</div>
+        </div>
+        <span class="badge green">Visible on load</span>
+      </div>
+      <div class="row" style="align-items:center;">
+        <input id="quickJobUrl" placeholder="Paste job URL here" />
+        <div style="display:flex; gap:8px;">
+          <button id="quickPreviewBtn">Preview Scrape</button>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <label class="muted" style="display:block; margin-bottom:6px; font-weight:bold; color:#0f172a;">Paste page content when the site blocks scraping</label>
+        <textarea id="quickPageContent" rows="8" placeholder="Paste the page text or HTML here, then click Parse Pasted Page"></textarea>
+        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <button id="quickParsePasteBtn">Parse Pasted Page</button>
+          <span class="muted">Works with copied text or page HTML source.</span>
+        </div>
+      </div>
+      <div id="quickScrapeResult" class="panel" style="margin-top:12px; display:none; white-space:pre-wrap;">
+        <div id="quickScrapeResultText"></div>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="quickAnalyseParsedBtn" style="display:none;">Analyse This Parsed Job</button>
+          <button id="quickRetryWithAiBtn" style="display:none;">Retry with AI</button>
+          <span id="aiRetryLoading" class="loading" style="display:none;">Parsing with AI...</span>
+        </div>
+      </div>
+      <div id="quickFilterPanel" class="card" style="margin-top:12px; display:none;">
+        <h4>Job Filter — First Stage Check</h4>
+        <div style="margin-bottom:16px;">
+          <div style="margin-bottom:12px;">
+            <strong>Geography Check:</strong> <span id="filterGeoVerdict" class="badge"></span>
+            <div id="filterGeoReason" class="muted" style="margin-top:4px;"></div>
+          </div>
+          <div style="margin-bottom:12px;">
+            <strong>Talent Fit:</strong> <span id="filterTalentScore" class="badge"></span>
+            <div id="filterTalentReason" class="muted" style="margin-top:4px;"></div>
+          </div>
+          <div style="margin-bottom:12px;">
+            <strong>Overall Recommendation:</strong>
+            <div id="filterRecommendation" class="muted" style="margin-top:4px;"></div>
+          </div>
+        </div>
+        <div style="margin-top:16px; padding-top:16px; border-top:1px solid #e5e7eb;">
+          <h5>Skills Gaps — Do You Have These?</h5>
+          <div id="filterGapsContainer" style="margin-top:8px;"></div>
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <button id="filterProceedBtn">Proceed to Full Analysis</button>
+            <button id="filterBackBtn" style="background:#6b7280;">Go Back & Try Another Job</button>
+            <span id="filterLoading" class="loading" style="display:none;">Filtering...</span>
+          </div>
+        </div>
+      </div>
+    </div>
     <section id="wizard-view">
       <div id="step1" class="step">
         <h2>Step 1 — Setup</h2>
-        <div class="card">
-          <input type="file" id="cvFile" accept="application/pdf" />
-          <button id="uploadCvBtn">Upload CV PDF</button><span id="uploadCvLoading" class="loading">Loading...</span>
-          <p id="cvStatus" class="muted"></p>
-        </div>
         <div class="card">
           <div class="row">
             <div style="flex:1"><label>Base Location</label><input id="baseLocation" /></div>
@@ -63,7 +163,11 @@
         <h2>Step 2 — Analyse Job</h2>
         <div class="card">
           <label>Job URL</label><input id="jobUrl" placeholder="https://..." />
-          <button id="analyseBtn">Analyse</button><span id="analyseLoading" class="loading">Loading...</span>
+          <div style="display:flex; gap:8px; align-items:center">
+            <button id="analyseBtn">Analyse</button>
+            <button id="previewBtn">Preview Scrape</button>
+            <span id="analyseLoading" class="loading">Loading...</span>
+          </div>
           <div id="manualBlock" style="display:none; margin-top:12px;">
             <p class="muted">Scraping failed. Paste details manually:</p>
             <input id="manualCompany" placeholder="Company" />
@@ -73,6 +177,11 @@
             <textarea id="manualDescription" rows="8" placeholder="Paste full job description"></textarea>
             <button id="analyseManualBtn">Analyse Manual Description</button>
           </div>
+        </div>
+        <div class="card" id="scrapeResultCard" style="display:none; margin-top:12px;">
+          <h4>Scrape result</h4>
+          <div id="scrapeResultPanel" class="panel"></div>
+          <div style="margin-top:8px;"><button id="useScrapeToManual">Use these details</button></div>
         </div>
         <div id="scoreCard" class="card" style="display:none;"></div>
         <button id="toStep3Btn" disabled>Continue to review gaps →</button>
@@ -149,8 +258,11 @@ async function loadConfig(){
   $('maxCommute').value = cfg.max_commute || '';
   $('targetRoles').value = (cfg.target_roles||[]).join(', ');
   $('dealBreakers').value = (cfg.deal_breakers||[]).join(', ');
-  $('cvStatus').textContent = cfg.cv_uploaded ? 'CV already uploaded.' : 'No CV uploaded yet.';
+  $('cvStatus').textContent = cfg.cv_uploaded ? 'CV saved on backend as data/master_cv.pdf. It will remain after refresh.' : 'No CV uploaded yet.';
+  $('cvPreviewStatus').textContent = cfg.cv_uploaded ? 'Preview loaded from /master-cv.' : 'Upload a CV to preview it here.';
+  $('cvPreviewFrame').src = cfg.cv_uploaded ? `${API}/master-cv` : 'about:blank';
   showStep(cfg.cv_uploaded ? 2 : 1);
+  if(cfg.cv_uploaded) fetchMasterCvText();
 }
 
 $('uploadCvBtn').onclick = async () => {
@@ -161,10 +273,24 @@ $('uploadCvBtn').onclick = async () => {
   try {
     const r = await fetch(API + '/upload-cv', { method:'POST', body: form });
     if(!r.ok) throw new Error(await r.text());
-    $('cvStatus').textContent = 'CV uploaded successfully.';
+    $('cvStatus').textContent = 'CV uploaded and saved as data/master_cv.pdf. Refresh-safe.';
+    $('cvPreviewStatus').textContent = 'Preview loaded from /master-cv.';
+    $('cvPreviewFrame').src = `${API}/master-cv?ts=${Date.now()}`;
+    fetchMasterCvText();
   } catch(e){ alert('Upload failed: '+e.message); }
   finally { showLoading('uploadCvLoading', false); }
 };
+
+async function fetchMasterCvText(){
+  showLoading('cvExtractLoading', true);
+  try{
+    const res = await api('/master-cv-text');
+    $('cvExtractedText').textContent = res.text || 'No text extracted (PDF may be image-scanned)';
+  }catch(e){ $('cvExtractedText').textContent = 'Failed to fetch extracted CV text: '+e.message; }
+  finally{ showLoading('cvExtractLoading', false); }
+}
+
+$('cvExtractRefreshBtn').onclick = () => fetchMasterCvText();
 
 $('saveConfigBtn').onclick = async () => {
   showLoading('configLoading', true);
@@ -192,6 +318,68 @@ function renderScoreCard(data){
   `;
 }
 
+function renderFilterPanel(filterResult){
+  // Hide scrape result, show filter panel
+  $('quickScrapeResult').style.display = 'none';
+  $('quickFilterPanel').style.display = 'block';
+  
+  // Geo verdict
+  const geoColor = filterResult.geo_verdict === 'green' ? 'green' : filterResult.geo_verdict === 'yellow' ? 'yellow' : 'red';
+  $('filterGeoVerdict').className = 'badge';
+  $('filterGeoVerdict').style.background = geoColor;
+  $('filterGeoVerdict').textContent = filterResult.geo_verdict.toUpperCase();
+  $('filterGeoReason').textContent = filterResult.geo_reason || '';
+  
+  // Talent fit score
+  const talentColor = filterResult.talent_fit_score >= 70 ? 'green' : filterResult.talent_fit_score >= 50 ? 'yellow' : 'red';
+  $('filterTalentScore').className = 'badge';
+  $('filterTalentScore').style.background = talentColor;
+  $('filterTalentScore').textContent = filterResult.talent_fit_score + '/100';
+  $('filterTalentReason').textContent = filterResult.talent_fit_reason || '';
+  
+  // Recommendation
+  $('filterRecommendation').textContent = filterResult.overall_recommendation || 'Review manually before proceeding.';
+  
+  // Gaps form
+  const gapsContainer = $('filterGapsContainer');
+  gapsContainer.innerHTML = '';
+  if(!filterResult.gaps || filterResult.gaps.length === 0){
+    gapsContainer.innerHTML = '<p class="muted">No skill gaps identified.</p>';
+  } else {
+    filterResult.gaps.forEach(g => {
+      const label = document.createElement('label');
+      label.style.display = 'flex';
+      label.style.alignItems = 'center';
+      label.style.gap = '8px';
+      label.style.marginBottom = '8px';
+      label.style.padding = '8px';
+      label.style.background = '#f9fafb';
+      label.style.borderRadius = '4px';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = g.in_cv || false;
+      checkbox.onchange = () => { g.answer = checkbox.checked; };
+      const span = document.createElement('span');
+      span.textContent = g.skill;
+      label.appendChild(checkbox);
+      label.appendChild(span);
+      gapsContainer.appendChild(label);
+    });
+  }
+  
+  // Set up button handlers
+  $('filterProceedBtn').onclick = () => {
+    // In future: pass to second model for CV/CL generation
+    alert('Filter passed! Next: send to CV/CL generation model.\n\nGeo: ' + filterResult.geo_verdict + '\nTalent: ' + filterResult.talent_fit_score + '/100');
+  };
+  
+  $('filterBackBtn').onclick = () => {
+    $('quickFilterPanel').style.display = 'none';
+    $('quickScrapeResult').style.display = 'block';
+  };
+}
+
+
 async function analyse(payload){
   showLoading('analyseLoading', true);
   try {
@@ -208,6 +396,143 @@ async function analyse(payload){
 }
 
 $('analyseBtn').onclick = () => analyse({ url: $('jobUrl').value.trim() });
+
+$('previewBtn').onclick = async () => {
+  const url = $('jobUrl').value.trim();
+  if(!url){ alert('Enter a URL first'); return; }
+  showLoading('analyseLoading', true);
+  try {
+    const res = await api('/scrape', { method:'POST', body: JSON.stringify({ url }) });
+    if(res.need_manual_description){
+      $('manualBlock').style.display='block';
+      $('scrapeResultCard').style.display='none';
+      alert('Scraping failed — paste description manually or try another URL');
+      return;
+    }
+    const job = res.job;
+    $('scrapeResultCard').style.display='block';
+    $('scrapeResultPanel').textContent = `Company: ${job.company}\nRole: ${job.role}\nLocation: ${job.location}\nContact info: ${job.contact_information || 'Unknown'}\nRemote ok: ${job.remote_ok}\n\nDescription:\n${job.description}`;
+    // show manual block so user can edit if needed
+    $('manualBlock').style.display='block';
+    // store last scrape result on the element for reuse
+    $('scrapeResultCard').dataset.job = JSON.stringify(job);
+  } catch(e){ alert('Preview failed: '+e.message); }
+  finally { showLoading('analyseLoading', false); }
+};
+
+// Quick scraper handlers (always visible)
+$('quickPreviewBtn').onclick = async () => {
+  const url = $('quickJobUrl').value.trim();
+  if(!url) { alert('Enter a URL first'); return; }
+  showLoading('analyseLoading', true);
+  try {
+    const res = await api('/scrape', { method:'POST', body: JSON.stringify({ url }) });
+    if(res.need_manual_description){
+      $('quickScrapeResult').style.display = 'block';
+      $('quickScrapeResultText').textContent = 'Scraping failed — paste description manually or try another URL';
+      $('quickRetryWithAiBtn').style.display = 'none';
+      $('quickAnalyseParsedBtn').style.display = 'none';
+      return;
+    }
+    const job = res.job;
+    $('quickScrapeResult').style.display = 'block';
+    $('quickScrapeResultText').textContent = `Company: ${job.company}\nRole: ${job.role}\nLocation: ${job.location}\nContact info: ${job.contact_information || 'Unknown'}\nRemote ok: ${job.remote_ok}\n\nDescription:\n${job.description}`;
+    // save description so AI retry can use it, and show both actions
+    $('quickScrapeResult').dataset.lastPageContent = job.description || '';
+    $('quickScrapeResult').dataset.lastParsedJob = JSON.stringify(job);
+    $('quickRetryWithAiBtn').style.display = 'inline-block';
+    $('quickAnalyseParsedBtn').style.display = 'inline-block';
+  } catch(e){ alert('Preview failed: '+e.message); }
+  finally { showLoading('analyseLoading', false); }
+};
+$('quickParsePasteBtn').onclick = async () => {
+  const pageContent = $('quickPageContent').value.trim();
+  const url = $('quickJobUrl').value.trim();
+  if(!pageContent){ alert('Paste the page content first'); return; }
+  showLoading('analyseLoading', true);
+  try {
+    $('quickScrapeResult').style.display = 'block';
+    $('quickScrapeResultText').textContent = 'Parsing pasted page...';
+    $('quickRetryWithAiBtn').style.display = 'none';
+    $('quickAnalyseParsedBtn').style.display = 'none';
+    const res = await api('/scrape', { method:'POST', body: JSON.stringify({ url: url || 'manual', page_content: pageContent }) });
+    if(res.need_manual_description){
+      $('quickScrapeResultText').textContent = 'Could not parse pasted page — try pasting more of the page or use manual job description.';
+      $('quickScrapeResult').dataset.lastPageContent = pageContent;
+      $('quickScrapeResult').dataset.lastParsedJob = '';
+      $('quickRetryWithAiBtn').style.display = 'inline-block';
+      return;
+    }
+    const job = res.job;
+    $('quickScrapeResultText').textContent = `Company: ${job.company}\nRole: ${job.role}\nLocation: ${job.location}\nContact info: ${job.contact_information || 'Unknown'}\nRemote ok: ${job.remote_ok}\n\nDescription:\n${job.description}`;
+    $('quickScrapeResult').dataset.lastPageContent = pageContent;
+    $('quickScrapeResult').dataset.lastParsedJob = JSON.stringify(job);
+    $('quickRetryWithAiBtn').style.display = 'inline-block';
+    $('quickAnalyseParsedBtn').style.display = 'inline-block';
+  } catch(e){
+    $('quickScrapeResultText').textContent = 'Paste parse failed: ' + e.message;
+    $('quickScrapeResult').dataset.lastPageContent = pageContent;
+    $('quickScrapeResult').dataset.lastParsedJob = '';
+    $('quickRetryWithAiBtn').style.display = 'inline-block';
+    $('quickAnalyseParsedBtn').style.display = 'none';
+  }
+  finally { showLoading('analyseLoading', false); }
+};
+
+$('quickRetryWithAiBtn').onclick = async () => {
+  const pageContent = $('quickScrapeResult').dataset.lastPageContent;
+  const url = $('quickJobUrl').value.trim();
+  if(!pageContent){ alert('No page content to retry'); return; }
+  showLoading('aiRetryLoading', true);
+  try {
+    $('quickScrapeResultText').textContent = 'Retrying with AI...';
+    const res = await api('/scrape-with-ai', { method:'POST', body: JSON.stringify({ url: url || 'manual', page_content: pageContent }) });
+    if(res.error){
+      $('quickScrapeResultText').textContent = 'AI parsing failed: ' + res.error;
+      $('quickAnalyseParsedBtn').style.display = 'none';
+      return;
+    }
+    if(res.need_manual_description){
+      $('quickScrapeResultText').textContent = 'AI parsing also failed. Please check the pasted content and try again.';
+      $('quickAnalyseParsedBtn').style.display = 'none';
+      return;
+    }
+    const job = res.job;
+    $('quickScrapeResultText').textContent = `Company: ${job.company}\nRole: ${job.role}\nLocation: ${job.location}\nContact info: ${job.contact_information || 'Unknown'}\nRemote ok: ${job.remote_ok}\n\nDescription:\n${job.description}`;
+    $('quickScrapeResult').dataset.lastParsedJob = JSON.stringify(job);
+    $('quickAnalyseParsedBtn').style.display = 'inline-block';
+  } catch(e){
+    $('quickScrapeResultText').textContent = 'AI retry failed: ' + e.message;
+    $('quickAnalyseParsedBtn').style.display = 'none';
+  }
+  finally { showLoading('aiRetryLoading', false); }
+};
+
+$('quickAnalyseParsedBtn').onclick = async () => {
+  const jobJson = $('quickScrapeResult').dataset.lastParsedJob;
+  if(!jobJson){ alert('No parsed job available yet. Parse first, then analyse.'); return; }
+  const job = JSON.parse(jobJson);
+  showLoading('filterLoading', true);
+  try {
+    // Call the filter endpoint for geo/talent/gaps check
+    const filterResult = await api('/filter-job', { 
+      method:'POST', 
+      body: JSON.stringify({ job }) 
+    });
+    if(filterResult.error){
+      alert('Filter failed: ' + filterResult.error);
+      return;
+    }
+    // Store filter result and display filter panel
+    state.currentJob = job;
+    state.filterResult = filterResult;
+    renderFilterPanel(filterResult);
+  } catch(e){ 
+    alert('Filter failed: ' + e.message); 
+  }
+  finally { showLoading('filterLoading', false); }
+};
+
 $('analyseManualBtn').onclick = () => analyse({
   url: $('jobUrl').value.trim(),
   manual_description: $('manualDescription').value,
@@ -216,6 +541,17 @@ $('analyseManualBtn').onclick = () => analyse({
   location: $('manualLocation').value,
   remote_ok: $('manualRemote').checked
 });
+
+$('useScrapeToManual').onclick = () => {
+  const data = $('scrapeResultCard').dataset.job;
+  if(!data) return alert('No scrape data available');
+  const job = JSON.parse(data);
+  $('manualCompany').value = job.company || '';
+  $('manualRole').value = job.role || '';
+  $('manualLocation').value = job.location || '';
+  $('manualRemote').checked = !!job.remote_ok;
+  $('manualDescription').value = job.description || '';
+};
 
 $('toStep3Btn').onclick = () => {
   if(!state.fit) return;

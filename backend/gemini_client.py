@@ -34,6 +34,9 @@ async def call_gemini(prompt: str, pdf_base64: str | None = None) -> str:
             params={"key": os.getenv("GEMINI_API_KEY")},
             json=payload,
         )
-        response.raise_for_status()
+        if not response.is_success:
+            error_text = response.text
+            print(f"Gemini API error: {response.status_code} - {error_text}")
+            response.raise_for_status()
         data = response.json()
         return data["candidates"][0]["content"]["parts"][0]["text"]

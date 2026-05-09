@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 import base64
+import io
+from typing import Optional
+
+try:
+    from PyPDF2 import PdfReader
+except Exception:
+    PdfReader = None
 import json
 from pathlib import Path
 from typing import Any
@@ -41,6 +48,32 @@ def load_master_cv_base64() -> str:
     if not MASTER_CV_PATH.exists():
         raise FileNotFoundError("Master CV not uploaded yet")
     return base64.b64encode(MASTER_CV_PATH.read_bytes()).decode("utf-8")
+
+
+def load_master_cv_text() -> str:
+    """Return extracted text from the master CV PDF. If PyPDF2 is unavailable,
+    return a base64 representation as fallback (less ideal).
+    """
+    if not MASTER_CV_PATH.exists():
+        raise FileNotFoundError("Master CV not uploaded yet")
+    if PdfReader is None:
+        # PdfReader not installed, return base64 fallback
+        return base64.b64encode(MASTER_CV_PATH.read_bytes()).decode("utf-8")
+
+    try:
+        data = MASTER_CV_PATH.read_bytes()
+        reader = PdfReader(io.BytesIO(data))
+        pages = []
+        for p in reader.pages:
+            try:
+                text = p.extract_text() or ""
+            except Exception:
+                text = ""
+            pages.append(text)
+        joined = "\n\n".join(pages).strip()
+        return joined if joined else base64.b64encode(data).decode("utf-8")
+    except Exception:
+        return base64.b64encode(MASTER_CV_PATH.read_bytes()).decode("utf-8")
 
 
 async def stage_1_geo_check(job: dict[str, Any]) -> dict[str, str]:
