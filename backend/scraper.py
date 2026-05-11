@@ -308,7 +308,7 @@ async def scrape_job(url: str) -> dict[str, Any] | None:
 async def parse_job_with_ai(page_content: str, url: str = "manual") -> dict[str, Any] | None:
     """Parse job content using Groq AI (fast, cheap fallback)."""
     try:
-    content_to_parse = _remove_noise_lines(_sanitize_text(page_content))
+        content_to_parse = _remove_noise_lines(_sanitize_text(page_content))
         prompt = f"""Extract job posting details from the following content. Return a JSON object with these exact fields:
 {{
     "company": "Company name or 'Unknown company'",
