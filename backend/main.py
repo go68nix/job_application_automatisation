@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import base64
 import json
+import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
+import httpx
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -20,6 +24,7 @@ from .fit_check import (
     stage_3_gap_qa,
 )
 from .generator import generate_documents
+from .make_client import call_make_webhook
 from .pdf_builder import build_pdfs
 from .scraper import parse_pasted_page, scrape_job, parse_job_with_ai
 from .job_filter import parse_job_with_groq, filter_job_with_groq
@@ -33,6 +38,7 @@ DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = DATA_DIR / "outputs"
 CONFIG_PATH = DATA_DIR / "user_config.json"
 MASTER_CV_PATH = DATA_DIR / "master_cv.pdf"
+MAKE_WEBHOOK_URL = os.getenv("MAKE_WEBHOOK_URL", "").strip()
 
 app = FastAPI(title="job-applier")
 app.add_middleware(
@@ -56,6 +62,7 @@ class FitCheckRequest(BaseModel):
 class GenerateRequest(BaseModel):
     job: dict[str, Any]
     gap_answers: list[dict[str, str]] = Field(default_factory=list)
+    gap_summary_text: str | None = None
     match_score: int | None = None
 
 
@@ -69,6 +76,117 @@ class ConfigModel(BaseModel):
 class PatchApplication(BaseModel):
     status: str | None = None
     notes: str | None = None
+
+
+def _sanitize_filename(name: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "_", (name or "").strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    return cleaned or "unknown"
+
+
+def _build_final_prompt(cv_text: str, job: dict[str, Any], gap_summary_text: str) -> str:
+    role = job.get("role", "Unknown role")
+    company = job.get("company", "Unknown company")
+    job_description = job.get("description", "")
+    return f"""You are an expert ATS resume writer and cover letter writer.
+
+Generate BOTH documents for this application in a PDF-ready format.
+
+Output requirements:
+1) CV content with this exact section order:
+   - Profile Summary
+   - Work Experience
+   - Personal Projects
+   - Technical Skills
+   - Education
+2) Cover Letter content (3 short paragraphs)
+3) Keep content truthful: use ONLY provided CV + gap answers + job description
+4) Keep ATS-safe plain text formatting (no tables, no columns, no icons)
+5) Ensure both outputs are suitable for direct PDF generation
+
+Return a JSON object only with this shape:
+{{
+  "cv_text": "...",
+  "cover_letter_text": "...",
+  "cv_pdf_base64": "optional base64 PDF without data URI prefix",
+  "cover_letter_pdf_base64": "optional base64 PDF without data URI prefix"
+}}
+
+TARGET ROLE: {role}
+TARGET COMPANY: {company}
+
+JOB DESCRIPTION:
+{job_description}
+
+CV TEXT:
+{cv_text}
+
+GAP SUMMARY:
+{gap_summary_text or "- no manual gap summary provided"}
+"""
+
+
+def _decode_base64_pdf(value: str) -> bytes:
+    raw = (value or "").strip()
+    if "," in raw and raw.lower().startswith("data:application/pdf;base64"):
+        raw = raw.split(",", 1)[1]
+    return base64.b64decode(raw, validate=False)
+
+
+async def _save_make_outputs(
+    company: str,
+    role: str,
+    make_result: dict[str, Any],
+) -> tuple[str | None, str | None, str, str]:
+    cv_text = str(make_result.get("cv_text", "")).strip()
+    cover_letter_text = str(
+        make_result.get("cover_letter_text", make_result.get("cl_text", ""))
+    ).strip()
+
+    today = datetime.now(tz=timezone.utc).date().isoformat()
+    folder_name = f"{_sanitize_filename(company)}_{_sanitize_filename(role)}_{today}"
+    output_dir = OUTPUT_DIR / folder_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cv_bytes: bytes | None = None
+    cl_bytes: bytes | None = None
+
+    cv_b64 = make_result.get("cv_pdf_base64")
+    cl_b64 = make_result.get("cover_letter_pdf_base64") or make_result.get("cl_pdf_base64")
+    if isinstance(cv_b64, str) and cv_b64.strip():
+        cv_bytes = _decode_base64_pdf(cv_b64)
+    if isinstance(cl_b64, str) and cl_b64.strip():
+        cl_bytes = _decode_base64_pdf(cl_b64)
+
+    cv_pdf_url = make_result.get("cv_pdf_url")
+    cl_pdf_url = make_result.get("cover_letter_pdf_url") or make_result.get("cl_pdf_url")
+    if cv_bytes is None and isinstance(cv_pdf_url, str) and cv_pdf_url.strip():
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(cv_pdf_url)
+            response.raise_for_status()
+            cv_bytes = response.content
+    if cl_bytes is None and isinstance(cl_pdf_url, str) and cl_pdf_url.strip():
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(cl_pdf_url)
+            response.raise_for_status()
+            cl_bytes = response.content
+
+    cv_path: str | None = None
+    cl_path: str | None = None
+
+    if cv_bytes and cl_bytes:
+        cv_file = output_dir / "cv.pdf"
+        cl_file = output_dir / "cover_letter.pdf"
+        cv_file.write_bytes(cv_bytes)
+        cl_file.write_bytes(cl_bytes)
+        cv_path = cv_file.relative_to(OUTPUT_DIR).as_posix()
+        cl_path = cl_file.relative_to(OUTPUT_DIR).as_posix()
+    elif cv_text and cover_letter_text:
+        cv_path, cl_path = build_pdfs(company, role, cv_text, cover_letter_text)
+    else:
+        raise ValueError("Make response did not include usable PDF or text outputs")
+
+    return cv_path, cl_path, cv_text, cover_letter_text
 
 
 @app.get("/")
@@ -254,16 +372,60 @@ async def generate(payload: GenerateRequest) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    try:
-        generated = await generate_documents(payload.job, cv_base64, payload.gap_answers)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Document generation failed: {exc}") from exc
-    cv_path, cl_path = build_pdfs(
-        payload.job.get("company", "Unknown company"),
-        payload.job.get("role", "Unknown role"),
-        generated["cv_text"],
-        generated["cover_letter_text"],
-    )
+    generated = None
+    cv_path = None
+    cl_path = None
+
+    # Prefer Make webhook flow when configured.
+    if MAKE_WEBHOOK_URL:
+        try:
+            cv_text_for_prompt = load_master_cv_text()
+        except Exception:
+            cv_text_for_prompt = "[CV text extraction unavailable]"
+
+        gap_summary_text = (payload.gap_summary_text or "").strip()
+        webhook_payload = {
+            "job_description": payload.job.get("description", ""),
+            "cv_text": cv_text_for_prompt,
+            "qa_result": {
+                "gap_answers": payload.gap_answers,
+                "gap_summary_text": gap_summary_text,
+            },
+            "job": payload.job,
+            "request_source": "job_application_backend",
+        }
+
+        try:
+            make_result = await call_make_webhook(MAKE_WEBHOOK_URL, webhook_payload)
+            cv_path, cl_path, cv_text_value, cover_letter_text_value = await _save_make_outputs(
+                payload.job.get("company", "Unknown company"),
+                payload.job.get("role", "Unknown role"),
+                make_result,
+            )
+            generated = {
+                "cv_text": cv_text_value or "[CV generated via Make webhook]",
+                "cover_letter_text": cover_letter_text_value or "[Cover letter generated via Make webhook]",
+            }
+        except Exception:
+            # Fall back to local model generation if webhook fails.
+            generated = None
+    
+    # Fallback: local Gemini generation (existing behavior)
+    if generated is None:
+        try:
+            generated = await generate_documents(payload.job, cv_base64, payload.gap_answers, payload.gap_summary_text)
+            cv_path, cl_path = build_pdfs(
+                payload.job.get("company", "Unknown company"),
+                payload.job.get("role", "Unknown role"),
+                generated["cv_text"],
+                generated["cover_letter_text"],
+            )
+        except Exception as exc:
+            error_msg = str(exc)
+            generated = {
+                "cv_text": f"[Document generation temporarily unavailable: {error_msg[:200]}... Please use the GPT prompt below to generate your CV in ChatGPT.]",
+                "cover_letter_text": "[Please generate using the GPT prompt provided below in ChatGPT.]",
+            }
 
     application_id = save_application(
         {
@@ -271,7 +433,7 @@ async def generate(payload: GenerateRequest) -> dict[str, Any]:
             "role": payload.job.get("role"),
             "url": payload.job.get("url"),
             "match_score": payload.match_score,
-            "status": "Generated",
+            "status": "Generated" if generated else "Pending",
             "date_generated": datetime.now(tz=timezone.utc).isoformat(),
             "cv_path": cv_path,
             "cl_path": cl_path,
@@ -331,3 +493,4 @@ async def get_config() -> dict[str, Any]:
 async def save_config(config: ConfigModel) -> dict[str, bool]:
     CONFIG_PATH.write_text(config.model_dump_json(indent=2), encoding="utf-8")
     return {"success": True}
+

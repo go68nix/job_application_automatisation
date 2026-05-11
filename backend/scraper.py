@@ -28,6 +28,67 @@ def _clean_keep_lines(text: str) -> str:
     return text.strip()
 
 
+def _sanitize_text(text: str) -> str:
+    """Remove control characters that can break model output or JSON parsing."""
+    if not text:
+        return ""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", text)
+
+
+def _loads_ai_json(text: str) -> dict[str, Any]:
+    return json.loads(text, strict=False)
+
+
+_NOISE_PATTERNS = (
+    r"\bcookie(s)?\b",
+    r"\bprivacy policy\b",
+    r"\bterms( of use| & conditions)?\b",
+    r"\ball rights reserved\b",
+    r"\baccept cookies?\b",
+    r"\bmanage cookies?\b",
+    r"\bnewsletter\b",
+    r"\bsubscribe\b",
+    r"\bsign in\b",
+    r"\blog in\b",
+    r"\bcreate account\b",
+    r"^skip to (content|main content)$",
+)
+
+
+def _remove_noise_lines(text: str) -> str:
+    """Remove common job-site boilerplate from scraped text before AI parsing."""
+    if not text:
+        return ""
+
+    cleaned_lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = _clean(raw_line)
+        if not line:
+            continue
+
+        lowered = line.lower()
+        if any(re.search(pattern, lowered, flags=re.IGNORECASE) for pattern in _NOISE_PATTERNS):
+            continue
+
+        # Skip dense menu/footer lines like: "Home | Jobs | About | Contact"
+        if line.count("|") >= 2 and len(line) < 160:
+            continue
+
+        words = line.split()
+        if len(words) <= 4 and all(w.isalpha() and len(w) <= 12 for w in words) and "." not in line:
+            navish = {"home", "about", "jobs", "careers", "contact", "privacy", "terms", "login", "sign", "menu"}
+            if any(w.lower() in navish for w in words):
+                continue
+
+        cleaned_lines.append(line)
+
+    # Preserve paragraph separation while collapsing duplicates.
+    text_out = "\n".join(cleaned_lines)
+    text_out = re.sub(r"\n{3,}", "\n\n", text_out)
+    return text_out.strip()
+
+
 def _html_to_text(content: str) -> str:
     content = html.unescape(content or "")
     content = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", content)
@@ -247,7 +308,7 @@ async def scrape_job(url: str) -> dict[str, Any] | None:
 async def parse_job_with_ai(page_content: str, url: str = "manual") -> dict[str, Any] | None:
     """Parse job content using Groq AI (fast, cheap fallback)."""
     try:
-        content_to_parse = page_content
+    content_to_parse = _remove_noise_lines(_sanitize_text(page_content))
         prompt = f"""Extract job posting details from the following content. Return a JSON object with these exact fields:
 {{
     "company": "Company name or 'Unknown company'",
@@ -264,6 +325,7 @@ Content to parse:
 Return ONLY valid JSON, no other text."""
 
         response_text = await call_groq(prompt)
+        response_text = _sanitize_text(response_text)
 
         # Extract JSON from response (in case there's extra text)
         json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
@@ -272,7 +334,7 @@ Return ONLY valid JSON, no other text."""
             return {"error": "AI response did not contain valid JSON"}
 
         try:
-            parsed = json.loads(json_match.group(0))
+            parsed = _loads_ai_json(json_match.group(0))
         except Exception as e:
             return {"error": f"Failed to parse AI JSON response: {e}"}
 

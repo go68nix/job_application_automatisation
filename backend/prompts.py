@@ -40,15 +40,21 @@ Respond with valid JSON only. No markdown, no backticks, no explanation.
 CV_GENERATION_PROMPT = """Generate a tailored CV summary with these rules:
 - Use ONLY facts from CV, never invent anything.
 - No buzzwords: leverage, passionate, dynamic, delve, spearhead, honed, pivotal, thrilled, keen, synergy, innovative, game-changer.
-- Include:
-  1) Professional summary (3 sentences)
-  2) Top 5 relevant bullet points
-  3) Key skills list
+- Keep the output clean and PDF-ready as plain text only.
+- Use this exact section order:
+  1) Profile Summary
+  2) Work Experience
+  3) Personal Projects
+  4) Technical Skills
+  5) Education
+- Under Work Experience, list roles in reverse chronological order.
+- Under Personal Projects, include only the most relevant projects from the CV.
+- Make sections concise, ATS-friendly, and easy to convert to PDF.
 - Integrate gap answers:
   - yes: include as real experience with user detail
   - somewhat: mention briefly with softer language
   - no: omit
-Return plain text with markdown-style headings and bullets.
+Return plain text with simple markdown-style headings and bullets.
 """
 
 COVER_LETTER_PROMPT = """Generate cover letter with these rules:

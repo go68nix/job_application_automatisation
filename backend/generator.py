@@ -18,7 +18,12 @@ def _gap_context(gap_answers: list[dict[str, str]]) -> str:
     return "\n".join(lines) if lines else "- no gaps provided"
 
 
-async def generate_documents(job: dict[str, Any], cv_base64: str, gap_answers: list[dict[str, str]]) -> dict[str, str]:
+async def generate_documents(
+    job: dict[str, Any],
+    cv_base64: str,
+    gap_answers: list[dict[str, str]],
+    gap_summary_text: str | None = None,
+) -> dict[str, str]:
     job_context = (
         f"Company: {job.get('company', '')}\n"
         f"Role: {job.get('role', '')}\n"
@@ -26,16 +31,20 @@ async def generate_documents(job: dict[str, Any], cv_base64: str, gap_answers: l
         f"Description:\n{job.get('description', '')}"
     )
     gap_context = _gap_context(gap_answers)
+    gap_summary = (gap_summary_text or "").strip()
+    gap_summary_block = gap_summary if gap_summary else "- no manual gap summary provided"
 
     cv_prompt = (
         f"{CV_GENERATION_PROMPT}\n\n"
         f"Job context:\n{job_context}\n\n"
-        f"Gap answers:\n{gap_context}"
+        f"Gap answers:\n{gap_context}\n\n"
+        f"Gap summary to append after the CV:\n{gap_summary_block}"
     )
     cl_prompt = (
         f"{COVER_LETTER_PROMPT}\n\n"
         f"Job context:\n{job_context}\n\n"
-        f"Gap answers:\n{gap_context}"
+        f"Gap answers:\n{gap_context}\n\n"
+        f"Gap summary to append after the CV:\n{gap_summary_block}"
     )
 
     cv_text = await call_gemini(cv_prompt, pdf_base64=cv_base64)

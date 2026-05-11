@@ -190,7 +190,16 @@
       <div id="step3" class="step">
         <h2>Step 3 — Gap Review</h2>
         <div id="gapContainer"></div>
-        <button id="generateBtn" disabled>Generate documents →</button><span id="generateLoading" class="loading">Loading...</span>
+        <div class="card" style="margin-top:12px;">
+          <div id="gapValidationStatus" class="muted" style="margin-bottom:10px;">Answer the gap questions, then validate your answers.</div>
+          <div class="row" style="margin-bottom:10px;">
+            <button id="validateGapAnswersBtn">Validate my answers</button>
+            <button id="buildGapTextBtn">Create gap text</button>
+            <button id="generateBtn" disabled>Generate documents →</button>
+            <span id="generateLoading" class="loading">Loading...</span>
+          </div>
+          <textarea id="gapSummaryOutput" rows="6" readonly placeholder="Gap text will appear here in the format: skill : answer" style="width:100%; resize:vertical;"></textarea>
+        </div>
       </div>
 
       <div id="step4" class="step">
@@ -200,6 +209,16 @@
           <a id="downloadCv" target="_blank"><button>Download CV PDF</button></a>
           <a id="downloadCl" target="_blank"><button>Download Cover Letter PDF</button></a>
         </div>
+
+        <div class="card" style="margin-bottom:16px; border:2px solid #8b5cf6; background:#faf5ff;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0;">GPT-4o Master Prompt (Copy & Paste)</h3>
+            <button id="copyPromptBtn" style="background:#8b5cf6;">📋 Copy to clipboard</button>
+          </div>
+          <p class="muted" style="margin:8px 0;">Below is the complete prompt with your data pre-filled. Copy and paste into ChatGPT for high-quality ATS-optimized CV generation.</p>
+          <textarea id="gptPromptOutput" rows="20" readonly style="width:100%; font-family:monospace; font-size:12px; resize:vertical; background:#f9f5ff; border:1px solid #d8b4fe;"></textarea>
+        </div>
+
         <div class="two-col">
           <div><h3>CV Summary</h3><div class="panel" id="cvPanel"></div></div>
           <div><h3>Cover Letter</h3><div class="panel" id="clPanel"></div></div>
@@ -237,7 +256,7 @@
 
 <script>
 const API = 'http://localhost:8000';
-const state = { currentStep: 1, fit: null, gaps: [], applicationId: null };
+const state = { currentStep: 1, fit: null, gaps: [], applicationId: null, currentJob: null, filterResult: null, pendingQuickProceed: null, gapsValidated: false, gapSummaryText: '', gapAnswersBySkill: {} };
 
 function $(id){ return document.getElementById(id); }
 function showLoading(id,on){ $(id).style.display = on ? 'inline' : 'none'; }
@@ -245,6 +264,24 @@ function showStep(n){ for(let i=1;i<=4;i++) $('step'+i).classList.toggle('active
 function scoreClass(score){ return score>=65?'green':score>=40?'yellow':'red'; }
 function badge(cls,text){ return `<span class="badge ${cls}">${text}</span>`; }
 function csvToList(v){ return v.split(',').map(x=>x.trim()).filter(Boolean); }
+
+function normalizeSkill(skill){
+  return String(skill || '').trim().toLowerCase();
+}
+
+function updateGapAnswer(skill, answer, detail = ''){
+  const key = normalizeSkill(skill);
+  if (!key) return;
+  state.gapAnswersBySkill[key] = {
+    skill: String(skill || '').trim(),
+    answer: String(answer || '').trim(),
+    detail: String(detail || '').trim(),
+  };
+}
+
+function getGapAnswer(skill){
+  return state.gapAnswersBySkill[normalizeSkill(skill)] || null;
+}
 
 async function api(path, options={}){
   const r = await fetch(API+path, { headers:{'Content-Type':'application/json'}, ...options });
@@ -318,6 +355,33 @@ function renderScoreCard(data){
   `;
 }
 
+function enterGapReviewFromFilter(filterResult){
+  const geo = {
+    verdict: filterResult.geo_verdict,
+    reason: filterResult.geo_reason || '',
+  };
+  const profile = {
+    match_score: filterResult.talent_fit_score || 0,
+    reason: filterResult.talent_fit_reason || '',
+  };
+  const gapList = (filterResult.gaps || []).map(g => {
+    const saved = getGapAnswer(g.skill) || {};
+    return { skill: g.skill, answer: saved.answer || null, detail: saved.detail || '' };
+  });
+
+  state.fit = {
+    job: state.currentJob || {},
+    geo,
+    profile,
+    gaps: filterResult.gaps || [],
+  };
+  state.gaps = gapList;
+  state.pendingQuickProceed = null;
+  $('quickFilterPanel').style.display = 'none';
+  renderGaps();
+  showStep(3);
+}
+
 function renderFilterPanel(filterResult){
   // Hide scrape result, show filter panel
   $('quickScrapeResult').style.display = 'none';
@@ -343,39 +407,83 @@ function renderFilterPanel(filterResult){
   // Gaps form
   const gapsContainer = $('filterGapsContainer');
   gapsContainer.innerHTML = '';
-  if(!filterResult.gaps || filterResult.gaps.length === 0){
+  const questions = filterResult.gap_questions || (filterResult.gaps || []).map(g => ({
+    skill: g.skill,
+    question: `Do you have hands-on experience with ${g.skill}?`,
+    follow_up: `How strong is your experience with ${g.skill}, and where have you used it?`,
+    options: ['yes', 'somewhat', 'no'],
+  }));
+  if(!questions.length){
     gapsContainer.innerHTML = '<p class="muted">No skill gaps identified.</p>';
   } else {
-    filterResult.gaps.forEach(g => {
-      const label = document.createElement('label');
-      label.style.display = 'flex';
-      label.style.alignItems = 'center';
-      label.style.gap = '8px';
-      label.style.marginBottom = '8px';
-      label.style.padding = '8px';
-      label.style.background = '#f9fafb';
-      label.style.borderRadius = '4px';
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = g.in_cv || false;
-      checkbox.onchange = () => { g.answer = checkbox.checked; };
-      const span = document.createElement('span');
-      span.textContent = g.skill;
-      label.appendChild(checkbox);
-      label.appendChild(span);
-      gapsContainer.appendChild(label);
+    questions.forEach((g, idx) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.style.marginBottom = '10px';
+      card.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+          <h4 style="margin:0;">${g.skill}</h4>
+          <button style="background:#dc2626; padding:4px 8px; font-size:12px; white-space:nowrap;" data-remove="${idx}">✕ Skip</button>
+        </div>
+        <p class="muted">${g.question}</p>
+        <div class="row" style="flex-wrap:wrap; margin-bottom:8px;">
+          <button data-a="yes">Yes</button>
+          <button data-a="somewhat">Somewhat</button>
+          <button data-a="no">No</button>
+        </div>
+        <textarea rows="3" placeholder="Add a short example or explanation" style="display:none"></textarea>
+      `;
+      const ta = card.querySelector('textarea');
+      card.querySelector(`button[data-remove]`).onclick = () => {
+        // Remove from both questions array and filterResult.gaps
+        const skillToRemove = g.skill;
+        questions.splice(idx, 1);
+        filterResult.gaps = (filterResult.gaps || []).filter(gap => gap.skill !== skillToRemove);
+        renderFilterPanel(filterResult);
+      };
+      const answerButtons = Array.from(card.querySelectorAll('button[data-a]'));
+      const paintSelected = () => {
+        answerButtons.forEach((btn) => {
+          const selected = btn.dataset.a === (g.answer || '');
+          btn.style.background = selected ? '#2563eb' : '#111827';
+          btn.style.border = selected ? '2px solid #93c5fd' : '2px solid transparent';
+        });
+      };
+      ta.value = g.detail || '';
+      ta.style.display = (g.answer === 'yes' || g.answer === 'somewhat') ? 'block' : 'none';
+      answerButtons.forEach(b => b.onclick = () => {
+        g.answer = b.dataset.a;
+        ta.style.display = (g.answer === 'yes' || g.answer === 'somewhat') ? 'block' : 'none';
+        if(ta.style.display === 'none') g.detail = '';
+        updateGapAnswer(g.skill, g.answer, g.detail || '');
+        paintSelected();
+      });
+      ta.oninput = () => { g.detail = ta.value; updateGapAnswer(g.skill, g.answer || '', g.detail); };
+      paintSelected();
+      gapsContainer.appendChild(card);
     });
+  }
+
+  if (filterResult.needs_warning) {
+    const warningText = filterResult.warning_message || 'This job may not be a good fit. Continue anyway?';
+    const warningParagraph = $('warningModal').querySelector('p');
+    if (warningParagraph) warningParagraph.textContent = warningText;
   }
   
   // Set up button handlers
   $('filterProceedBtn').onclick = () => {
-    // In future: pass to second model for CV/CL generation
-    alert('Filter passed! Next: send to CV/CL generation model.\n\nGeo: ' + filterResult.geo_verdict + '\nTalent: ' + filterResult.talent_fit_score + '/100');
+    if (filterResult.needs_warning) {
+      state.pendingQuickProceed = () => enterGapReviewFromFilter(filterResult);
+      $('warningModal').style.display = 'flex';
+      return;
+    }
+    enterGapReviewFromFilter(filterResult);
   };
   
   $('filterBackBtn').onclick = () => {
     $('quickFilterPanel').style.display = 'none';
     $('quickScrapeResult').style.display = 'block';
+    state.pendingQuickProceed = null;
   };
 }
 
@@ -390,7 +498,12 @@ async function analyse(payload){
     renderScoreCard(data);
     const shouldWarn = data.geo.verdict === 'red' || data.profile.match_score < 40;
     $('toStep3Btn').disabled = shouldWarn;
-    if (shouldWarn) $('warningModal').style.display = 'flex';
+    if (shouldWarn) {
+      const warningParagraph = $('warningModal').querySelector('p');
+      if (warningParagraph) warningParagraph.textContent = 'This job may not be a good fit. Continue anyway?';
+      state.pendingQuickProceed = null;
+      $('warningModal').style.display = 'flex';
+    }
   } catch(e){ alert('Analyse failed: '+e.message); }
   finally { showLoading('analyseLoading', false); }
 }
@@ -561,19 +674,92 @@ $('toStep3Btn').onclick = () => {
 
 $('warningCancel').onclick = () => $('warningModal').style.display='none';
 $('warningContinue').onclick = () => {
+  if (typeof state.pendingQuickProceed === 'function') {
+    const fn = state.pendingQuickProceed;
+    state.pendingQuickProceed = null;
+    $('warningModal').style.display='none';
+    fn();
+    return;
+  }
   $('toStep3Btn').disabled = false;
   $('warningModal').style.display='none';
 };
 
+function updateGapValidationUI(message = ''){
+  const status = $('gapValidationStatus');
+  if (status) {
+    status.textContent = message || (state.gapsValidated ? 'Answers validated. You can generate your documents.' : 'Answer the gap questions, then validate your answers.');
+    status.style.color = state.gapsValidated ? '#166534' : '#6b7280';
+  }
+  $('generateBtn').disabled = !state.gapsValidated;
+}
+
+function buildGapSummaryText(){
+  const lines = state.gaps
+    .filter((g) => (g.skill || '').trim())
+    .map((g) => {
+      const skill = String(g.skill || '').trim();
+      const cached = getGapAnswer(skill) || {};
+      const answer = String(g.answer || cached.answer || '').trim() || 'no answer';
+      const detail = String(g.detail || cached.detail || '').trim();
+      return detail ? `${skill} : ${answer} ${detail}` : `${skill} : ${answer}`;
+    });
+
+  const text = lines.length ? lines.join('\n') : 'No gap answers provided.';
+  state.gapSummaryText = text;
+  const output = $('gapSummaryOutput');
+  if (output) output.value = text;
+  return text;
+}
+
+function validateGapAnswers(){
+  if (!state.gaps.length) {
+    state.gapsValidated = true;
+    updateGapValidationUI('No skill gaps to validate. You can generate documents.');
+    return true;
+  }
+
+  const missing = [];
+
+  state.gaps.forEach((g) => {
+    const answer = String(g.answer || getGapAnswer(g.skill)?.answer || '').trim();
+    if (!answer) {
+      missing.push(g.skill);
+    }
+  });
+
+  if (missing.length) {
+    state.gapsValidated = false;
+    const parts = [];
+    if (missing.length) parts.push(`answer: ${missing.join(', ')}`);
+    updateGapValidationUI(`Please ${parts.join(' and ')}.`);
+    return false;
+  }
+
+  state.gapsValidated = true;
+  updateGapValidationUI('Answers validated. You can generate your documents.');
+  return true;
+}
+
 function renderGaps(){
   const container = $('gapContainer');
   container.innerHTML = '';
-  if(!state.gaps.length){ container.innerHTML = '<p class="muted">No missing skills to review.</p>'; $('generateBtn').disabled = false; return; }
-  state.gaps.forEach((g) => {
+  state.gapSummaryText = '';
+  if ($('gapSummaryOutput')) $('gapSummaryOutput').value = '';
+  if(!state.gaps.length){ container.innerHTML = '<p class="muted">No missing skills to review.</p>'; state.gapsValidated = true; updateGapValidationUI('No skill gaps to validate. You can generate documents.'); return; }
+  state.gapsValidated = false;
+  updateGapValidationUI();
+  state.gaps.forEach((g, idx) => {
+    const cached = getGapAnswer(g.skill) || {};
+    if (!g.answer && cached.answer) g.answer = cached.answer;
+    if (!g.detail && cached.detail) g.detail = cached.detail;
     const card = document.createElement('div');
     card.className='card';
     card.innerHTML = `
-      <h4>${g.skill}</h4>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+        <h4 style="margin:0;">${g.skill}</h4>
+        <button style="background:#dc2626; padding:4px 8px; font-size:12px; white-space:nowrap;" data-remove="${idx}">✕ Remove</button>
+      </div>
       <p class="muted">Found in your CV? No</p>
       <div class="row">
         <button data-a="yes">Yes, I have this</button>
@@ -583,25 +769,199 @@ function renderGaps(){
       <textarea rows="3" placeholder="Briefly describe your experience" style="display:none"></textarea>
     `;
     const ta = card.querySelector('textarea');
-    card.querySelectorAll('button[data-a]').forEach(b => b.onclick = () => {
+    const answerButtons = Array.from(card.querySelectorAll('button[data-a]'));
+
+    const paintSelected = () => {
+      answerButtons.forEach((btn) => {
+        const selected = (btn.dataset.a === (g.answer || ''));
+        btn.style.background = selected ? '#2563eb' : '#111827';
+        btn.style.border = selected ? '2px solid #93c5fd' : '2px solid transparent';
+      });
+    };
+
+    ta.value = g.detail || '';
+    ta.style.display = (g.answer === 'yes' || g.answer === 'somewhat') ? 'block' : 'none';
+
+    card.querySelector(`button[data-remove]`).onclick = () => {
+      delete state.gapAnswersBySkill[normalizeSkill(g.skill)];
+      state.gaps.splice(idx, 1);
+      state.gapsValidated = false;
+      state.gapSummaryText = '';
+      if ($('gapSummaryOutput')) $('gapSummaryOutput').value = '';
+      renderGaps();
+    };
+    answerButtons.forEach(b => b.onclick = () => {
       g.answer = b.dataset.a;
       ta.style.display = (g.answer === 'yes' || g.answer === 'somewhat') ? 'block' : 'none';
       if(ta.style.display === 'none') g.detail = '';
-      $('generateBtn').disabled = state.gaps.some(x => !x.answer);
+      updateGapAnswer(g.skill, g.answer, g.detail || '');
+      state.gapsValidated = false;
+      buildGapSummaryText();
+      updateGapValidationUI('Answer updated. Validate again before generating.');
+      paintSelected();
     });
-    ta.oninput = () => { g.detail = ta.value; };
+    ta.oninput = () => { g.detail = ta.value; updateGapAnswer(g.skill, g.answer || '', g.detail); state.gapsValidated = false; buildGapSummaryText(); updateGapValidationUI('Answer updated. Validate again before generating.'); };
+    paintSelected();
     container.appendChild(card);
   });
-  $('generateBtn').disabled = state.gaps.some(x => !x.answer);
+  buildGapSummaryText();
+  $('generateBtn').disabled = true;
+}
+
+$('validateGapAnswersBtn').onclick = () => validateGapAnswers();
+
+$('buildGapTextBtn').onclick = () => {
+  const text = buildGapSummaryText();
+  updateGapValidationUI(state.gaps.length ? 'Gap text created. You can copy it or generate documents.' : 'No skill gaps to summarize.');
+  return text;
+};
+
+function buildGPTPrompt(cvText, jobDesc, gapSummary, role, company){
+  return `## TASK: Generate an ATS-Optimized CV AND Cover Letter (PDF Format)
+
+You are an expert CV writer specializing in ATS (Applicant Tracking System) optimization and resume tailoring for specific job roles.
+
+### YOUR GOALS:
+1. Create ONLY truthful content based on the provided CV and user experience
+2. Maximize ATS compatibility (no tables, columns, icons, graphics, fancy formatting)
+3. Align keywords with the job description while maintaining authenticity
+4. Structure for human readability AND machine parsing
+5. Showcase measurable impact and results
+6. Integrate user's gap answers naturally into relevant sections
+
+---
+
+### INPUT DATA:
+
+**ORIGINAL CV TEXT:**
+${cvText}
+
+**JOB DESCRIPTION:**
+${jobDesc}
+
+**USER'S SKILLS GAPS & ANSWERS:**
+${gapSummary}
+
+**TARGET ROLE:** ${role}
+**TARGET COMPANY:** ${company}
+
+---
+
+### OUTPUT REQUIREMENTS:
+
+**Format:**
+- Plain text only (no markdown, tables, or columns)
+- Use simple section headers: # HEADER, ## SUBHEADER
+- Maximum 1 page or 2 pages if truly necessary
+- Clean, scannable bulleted structure
+
+**Content Rules:**
+- ONLY use facts from the provided CV + user gap answers
+- NEVER invent skills, companies, dates, or achievements
+- Reuse job description keywords ONLY when truthfully applicable
+- Include numbers, percentages, and measurable results where available
+- Make bullets concise (1-2 lines max)
+- Put most relevant experience first
+- Keep the result clean and PDF-ready as plain text
+
+**Final Output Requirement:**
+- Produce TWO separate sections in the response:
+  1) Tailored CV
+  2) Tailored Cover Letter
+- Keep them clearly separated with headings.
+- Write both outputs in a clean format ready for direct PDF generation/export.
+
+**Sections (in order):**
+1. **Profile Summary** (2-3 sentences)
+  - Role-specific and tailored to the target position
+  - Lead with the top 2-3 most relevant qualifications
+  - Mention key technical skills that match the JD
+
+2. **Work Experience** (reverse chronological)
+  - For each role: [Title] | [Company] | [Dates]
+  - 3-4 impact-focused bullets per role
+  - Lead with achievements, not duties
+  - Use metrics: numbers, percentages, scales (e.g., "improved by 40%", "managed 5-person team")
+  - Highlight experience matching JD keywords
+
+3. **Personal Projects**
+  - Include the most relevant projects from the CV
+  - Focus on outcomes, tools used, and measurable impact
+
+4. **Technical Skills** (organized by category)
+  - Languages, Frameworks, Databases, Tools, Platforms
+  - Only include skills mentioned in the original CV + confirmed gap answers
+  - Order by relevance to the target role
+
+5. **Education**
+  - Degree, Field, University, Graduation date
+  - Relevant coursework only if valuable for the target role
+
+6. **Additional Sections** (if applicable from original CV)
+  - Certifications, Languages, Publications
+
+**Cover Letter Requirements:**
+- After the CV, generate a separate cover letter for the same role/company.
+- Use ONLY facts from the CV + gap answers.
+- Tone: warm, confident, and natural.
+- Never open with "I am writing to apply" or similar generic openings.
+- Structure exactly 3 short paragraphs:
+  1) why this role/company
+  2) relevant experience and fit
+  3) value you bring + call to action
+- Length: 260-320 words
+- Keep it ATS-friendly and plain text only, formatted for PDF export
+
+**Integration of Gap Answers:**
+- If user answered "yes" to a skill: weave it naturally into relevant experience bullets or technical skills
+- If user answered "somewhat": mention it briefly with context
+- If user answered "no": omit from CV
+- Example: If "Data Science: yes, done projects with it" → add to Technical Skills + mention in a relevant project/role
+
+**ATS Safety Checklist:**
+- No tables, columns, or multi-column layouts
+- No icons, graphics, colors, or special characters
+- No headers that are just images
+- Standard fonts (no fancy fonts)
+- Consistent bullet formatting
+- One-page preferred, max two pages
+- Standard margins (1 inch)
+- Use "•" for bullets (not special symbols)
+
+**Keyword Optimization:**
+- Scan the job description for critical technical terms
+- Naturally incorporate them in Professional Summary, Technical Skills, and Experience bullets
+- Never force keywords where they don't apply
+- Priority: truthfulness > keyword stuffing
+
+---
+
+### FINAL INSTRUCTION:
+Generate a compelling, ATS-friendly CV tailored specifically to the role of **${role}** at **${company}**. 
+- Maximize relevance to the job description
+- Maintain 100% truthfulness
+- Optimize for keyword matching WITHOUT sacrificing authenticity
+- Make it scannable and impactful
+- Output as clean plain text ready to paste into an ATS system
+
+At the end, label the outputs exactly as:
+CV:
+[tailored CV here]
+
+Cover Letter:
+[tailored cover letter here]`;
 }
 
 $('generateBtn').onclick = async () => {
   if(!state.fit) return;
+  if(!validateGapAnswers()) return;
+  const gapSummaryText = state.gapSummaryText || buildGapSummaryText();
   showLoading('generateLoading', true);
   try {
     const r = await api('/generate', { method:'POST', body: JSON.stringify({
       job: state.fit.job,
       gap_answers: state.gaps,
+      gap_summary_text: gapSummaryText,
       match_score: state.fit.profile.match_score
     })});
     state.applicationId = r.application_id;
@@ -612,10 +972,37 @@ $('generateBtn').onclick = async () => {
     $('downloadCl').href = `${API}/outputs/${r.cl_path}`;
     $('finalStatus').value = 'Generated';
     $('finalNotes').value = '';
+    
+    // Fetch CV text and build GPT prompt
+    try {
+      const cvRes = await api('/master-cv-text');
+      const cvText = cvRes.text || '[CV text not available]';
+      const jobDesc = state.fit.job.description || '[Job description not available]';
+      const role = state.fit.job.role || '[Role]';
+      const company = state.fit.job.company || '[Company]';
+      const prompt = buildGPTPrompt(cvText, jobDesc, gapSummaryText, role, company);
+      $('gptPromptOutput').value = prompt;
+    } catch(cvErr){
+      $('gptPromptOutput').value = '[Could not fetch CV text. Please manually copy your CV text from the Overview section.]';
+    }
+    
     showStep(4);
     await loadTracker();
   } catch(e){ alert('Generate failed: '+e.message); }
   finally { showLoading('generateLoading', false); }
+};
+
+$('copyPromptBtn').onclick = () => {
+  const promptText = $('gptPromptOutput').value;
+  if(!promptText){
+    alert('No prompt generated yet.');
+    return;
+  }
+  navigator.clipboard.writeText(promptText).then(() => {
+    alert('✓ Prompt copied to clipboard! Paste into ChatGPT.');
+  }).catch(() => {
+    alert('Could not copy. Try manually selecting and copying.');
+  });
 };
 
 $('saveFinalMetaBtn').onclick = async () => {
@@ -628,7 +1015,7 @@ $('saveFinalMetaBtn').onclick = async () => {
 };
 
 $('newApplicationBtn').onclick = () => {
-  state.fit = null; state.gaps = []; state.applicationId = null;
+  state.fit = null; state.gaps = []; state.applicationId = null; state.gapsValidated = false; state.gapAnswersBySkill = {}; state.gapSummaryText = '';
   $('scoreCard').style.display='none';
   $('manualBlock').style.display='none';
   $('jobUrl').value='';
